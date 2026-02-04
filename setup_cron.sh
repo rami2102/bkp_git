@@ -17,6 +17,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_SCRIPT="${SCRIPT_DIR}/github_backup.sh"
 LOG_FILE="${SCRIPT_DIR}/backup.log"
 
+# Load environment variables
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+# Default backup time (24-hour format HH:MM)
+BACKUP_TIME="${BACKUP_TIME:-00:01}"
+
 # Cron job identifier (used to find/replace existing entry)
 CRON_ID="# github_backup_job"
 
@@ -34,7 +45,7 @@ show_usage() {
     echo "  status      Show current cron job status"
     echo "  help        Show this help message"
     echo ""
-    echo "The cron job runs daily at the same time it was installed."
+    echo "The cron job runs daily at the time configured in .env (BACKUP_TIME, default: 00:01)"
     echo "Logs are written to: $LOG_FILE"
 }
 
@@ -63,12 +74,16 @@ install_cron() {
 
     log_info "Installing cron job for daily backup..."
 
-    # Get current hour and minute to schedule at same time daily
+    # Parse BACKUP_TIME (format: HH:MM)
     local hour minute
-    hour=$(date +%H)
-    minute=$(date +%M)
+    hour=$(echo "$BACKUP_TIME" | cut -d':' -f1)
+    minute=$(echo "$BACKUP_TIME" | cut -d':' -f2)
 
-    # Build cron line: run daily at current time
+    # Remove leading zeros for cron compatibility
+    hour=$((10#$hour))
+    minute=$((10#$minute))
+
+    # Build cron line: run daily at configured time
     # Format: minute hour * * * command
     local cron_line="${minute} ${hour} * * * ${BACKUP_SCRIPT} >> ${LOG_FILE} 2>&1 ${CRON_ID}"
 
@@ -88,7 +103,7 @@ install_cron() {
 
     if has_existing_job; then
         log_success "Cron job installed successfully!"
-        log_info "Schedule: Daily at ${hour}:${minute}"
+        log_info "Schedule: Daily at ${BACKUP_TIME} (configured in .env)"
         log_info "Log file: ${LOG_FILE}"
         echo ""
         log_info "Current cron entry:"
