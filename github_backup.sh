@@ -133,6 +133,37 @@ check_backup_size() {
     fi
 }
 
+# Get directory size in bytes
+get_dir_size_bytes() {
+    local dir_path="$1"
+    if [[ -d "$dir_path" ]]; then
+        du -sb "$dir_path" 2>/dev/null | cut -f1
+    else
+        echo "0"
+    fi
+}
+
+# Get today's backup size (zip files created today)
+get_today_backup_size_bytes() {
+    local backup_path="$1"
+    local today_prefix="$2"
+    local total_size=0
+
+    if [[ ! -d "$backup_path" ]]; then
+        echo "0"
+        return
+    fi
+
+    # Find zip files with today's date prefix and sum their sizes
+    while IFS= read -r -d '' zip_file; do
+        local file_size
+        file_size=$(stat -c%s "$zip_file" 2>/dev/null || echo "0")
+        ((total_size += file_size))
+    done < <(find "$backup_path" -type f -name "*${today_prefix}*.zip" -print0 2>/dev/null)
+
+    echo "$total_size"
+}
+
 # Rotate old backups (delete zip files older than RETENTION_DAYS)
 rotate_backups() {
     local backup_path="$1"
@@ -513,9 +544,28 @@ main() {
     check_backup_size "$BACKUP_DIR" "$BACKUP_SIZE_WARNING_GB"
     check_free_space "$SCRIPT_DIR" "$FREE_SPACE_ERROR_GB"
 
+    # Calculate summary statistics
+    local today_date_prefix
+    today_date_prefix=$(date +"%Y%m%d")
+
+    local today_backup_bytes total_backup_bytes total_repos_bytes
+    today_backup_bytes=$(get_today_backup_size_bytes "$BACKUP_DIR" "$today_date_prefix")
+    total_backup_bytes=$(get_dir_size_bytes "$BACKUP_DIR")
+    total_repos_bytes=$(get_dir_size_bytes "$CLONE_DIR")
+
+    local today_backup_gb total_backup_gb total_repos_gb
+    today_backup_gb=$(bytes_to_gb "$today_backup_bytes")
+    total_backup_gb=$(bytes_to_gb "$total_backup_bytes")
+    total_repos_gb=$(bytes_to_gb "$total_repos_bytes")
+
     log_info "=========================================="
     log_success "Backup completed!"
     log_info "Backups stored in: $BACKUP_DIR"
+    log_info "------------------------------------------"
+    log_info "Summary:"
+    log_info "  Today's backup size:      ${today_backup_gb} GB"
+    log_info "  Total backups on disk:    ${total_backup_gb} GB"
+    log_info "  Total git repos on disk:  ${total_repos_gb} GB"
     log_info "=========================================="
 }
 
