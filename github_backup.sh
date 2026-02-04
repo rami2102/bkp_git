@@ -6,7 +6,8 @@
 # 1. Reads repository list from a markdown file
 # 2. Clones repos if not exists, updates master and recent branches
 # 3. Creates zip backups for master and non-merged files in recent branches
-# 4. Monitors disk space and backup size
+# 4. Rotates old backups (deletes zip files older than RETENTION_DAYS)
+# 5. Monitors disk space and backup size
 #
 
 set -euo pipefail
@@ -38,6 +39,7 @@ BACKUP_SIZE_WARNING_GB="${BACKUP_SIZE_WARNING_GB:-10}"
 FREE_SPACE_ERROR_GB="${FREE_SPACE_ERROR_GB:-20}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 ZIP_FOLDER_NAME="${ZIP_FOLDER_NAME:-zips}"
+RETENTION_DAYS="${RETENTION_DAYS:-7}"
 
 # Convert to absolute paths if relative
 [[ "$REPO_LIST_FILE" != /* ]] && REPO_LIST_FILE="${SCRIPT_DIR}/${REPO_LIST_FILE}"
@@ -128,6 +130,41 @@ check_backup_size() {
         log_warning "Total backup size (${total_gb}GB) exceeds warning threshold (${warn_gb}GB)!"
     else
         log_info "Total backup size: ${total_gb}GB (warning threshold: ${warn_gb}GB)"
+    fi
+}
+
+# Rotate old backups (delete zip files older than RETENTION_DAYS)
+rotate_backups() {
+    local backup_path="$1"
+    local retention_days="$2"
+
+    if [[ ! -d "$backup_path" ]]; then
+        return 0
+    fi
+
+    log_info "Rotating backups older than ${retention_days} days..."
+
+    # Find and delete zip files older than retention period
+    local deleted_count=0
+    local deleted_size=0
+
+    while IFS= read -r -d '' zip_file; do
+        local file_size
+        file_size=$(stat -c%s "$zip_file" 2>/dev/null || echo "0")
+        rm -f "$zip_file"
+        ((deleted_count++))
+        ((deleted_size += file_size))
+    done < <(find "$backup_path" -type f -name "*.zip" -mtime +"$retention_days" -print0 2>/dev/null)
+
+    # Clean up empty directories
+    find "$backup_path" -type d -empty -delete 2>/dev/null || true
+
+    if (( deleted_count > 0 )); then
+        local deleted_gb
+        deleted_gb=$(bytes_to_gb "$deleted_size")
+        log_success "Deleted $deleted_count old backup(s), freed ${deleted_gb}GB"
+    else
+        log_info "No backups older than ${retention_days} days found"
     fi
 }
 
@@ -468,6 +505,9 @@ main() {
     done <<< "$repos"
 
     log_info "------------------------------------------"
+
+    # Rotate old backups
+    rotate_backups "$BACKUP_DIR" "$RETENTION_DAYS"
 
     # Final space checks
     check_backup_size "$BACKUP_DIR" "$BACKUP_SIZE_WARNING_GB"

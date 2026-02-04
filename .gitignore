@@ -1,0 +1,12 @@
+# Cloned repositories
+repos/
+
+# Backup files
+backups/
+
+# Logs
+*.log
+backup.log
+
+# Environment (contains tokens)
+.env
